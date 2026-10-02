@@ -1,4 +1,4 @@
-import { handle } from '../server.mjs';
+import { handle } from '../app-server.mjs';
 export default function handler(req, res) {
   return handle(req, res);
 }
