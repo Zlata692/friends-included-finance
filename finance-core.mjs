@@ -71,7 +71,7 @@ async function handle(req, res) {
   if (req.method === 'GET' && url.pathname === '/api/state') { const d = await load(); return response(res,200,{employees:d.employees,records:d.records,totals:totals(d.records)}); }
   if (req.method !== 'POST') return response(res,404,{error:'Not found'});
   let body=''; for await (const c of req) { body += c; if (body.length > 100_000) throw Error('Request is too large.'); } try { body = JSON.parse(body || '{}'); const data = await load();
-    if (url.pathname === '/telegram/webhook') {
+    if (url.pathname === '/telegram/webhook' || url.pathname === '/api/telegram/webhook') {
       if (process.env.TELEGRAM_WEBHOOK_SECRET && req.headers['x-telegram-bot-api-secret-token'] !== process.env.TELEGRAM_WEBHOOK_SECRET) return response(res, 401, { error: 'Invalid Telegram webhook secret.' });
       const message = body.message; if (!message?.chat?.id || !message?.from?.id) return response(res, 200, { ok: true });
       const employee = data.employees.find((person) => String(person.telegramUserId) === String(message.from.id));
