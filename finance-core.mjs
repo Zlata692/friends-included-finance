@@ -75,7 +75,7 @@ async function handle(req, res) {
       if (process.env.TELEGRAM_WEBHOOK_SECRET && req.headers['x-telegram-bot-api-secret-token'] !== process.env.TELEGRAM_WEBHOOK_SECRET) return response(res, 401, { error: 'Invalid Telegram webhook secret.' });
       const message = body.message; if (!message?.chat?.id || !message?.from?.id) return response(res, 200, { ok: true });
       const employee = data.employees.find((person) => String(person.telegramUserId) === String(message.from.id));
-      if (!employee) { await telegramSend(message.chat.id, 'Your Telegram account is not linked. Ask Svetlana to link your Telegram user ID in Manager setup.'); return response(res, 200, { ok: true }); }
+      if (!employee) { await telegramSend(message.chat.id, 'Your Telegram account is not linked. Send these details to Svetlana for Manager setup. User ID: ' + message.from.id + '. Chat ID: ' + message.chat.id); return response(res, 200, { ok: true }); }
       if (String(message.text || '').trim().toLowerCase() === '/start') { await telegramSend(message.chat.id, `You are linked as ${employee.name}.`); return response(res, 200, { ok: true }); }
       const record = submission(data, parseTelegramSubmission(message.text, employee.id)); record.notificationChatId = String(message.chat.id); data.records.push(record); await sync(record); await save(data); await notify(record, submissionConfirmation(record)); await save(data); return response(res, 200, { ok: true });
     }
