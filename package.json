@@ -4,7 +4,6 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node --env-file-if-exists=.env app-server.mjs",
     "telegram:poll": "node --env-file=.env telegram-poll.mjs",
     "migrate:supabase": "node --env-file=.env migrate-local-data.mjs"
   }
