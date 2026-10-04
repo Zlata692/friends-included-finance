@@ -6,16 +6,31 @@ const eur = (n) => new Intl.NumberFormat('en-IE', { style: 'currency', currency:
 async function api(path, body) {
   const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const text = await response.text();
-  const payload = JSON.parse(text);
-  if (!response.ok) throw new Error(payload.error);
+  let payload;
+  try { payload = JSON.parse(text); } catch { throw new Error('The service returned an unexpected response. Please try again.'); }
+  if (!response.ok) throw new Error(payload.error || 'The request could not be completed.');
   return payload;
 }
 function showNotice(text, error = false) { $('#notice').innerHTML = `<div class="notice ${error ? 'error' : ''}">${text}</div>`; window.scrollTo({ top: 0, behavior: 'smooth' }); }
 async function refresh() {
-  const response = await fetch(`/api/state?actorId=${encodeURIComponent(current)}`, { cache: 'no-store' });
-  state = await response.json().catch(() => { throw new Error('The role could not be loaded. Please try again.'); });
-  if (!response.ok) throw new Error(state.error);
-  render();
+  const url = `/api/state?actorId=${encodeURIComponent(current)}&t=${Date.now()}`;
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(url, { cache: 'no-store' });
+      const text = await response.text();
+      let payload;
+      try { payload = JSON.parse(text); } catch { throw new Error('The service returned an unexpected response.'); }
+      if (!response.ok) throw new Error(payload.error || 'The role could not be loaded.');
+      state = payload;
+      render();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+    }
+  }
+  throw new Error(`Could not load this role. Please try again. (${lastError.message})`);
 }
 function render() {
   const me = state.employees.find((person) => person.id === current);
@@ -32,6 +47,12 @@ function render() {
   renderManager(me);
   renderTable(manager);
   $('#linkEmployee').innerHTML = state.employees.map((person) => `<option value="${person.id}">${person.name}</option>`).join('');
+  if (!$('#transferLink')) {
+    $('#managerOnly').insertAdjacentHTML('beforeend', '<hr><h3>Safe reviewer test-account transfer</h3><p class="muted">Moves only the Telegram account already linked to the selected source employee. It does not delete or alter accounting records; existing records keep their original notification destination.</p><div class="fields"><label><span>Currently linked to</span><select id="transferFrom"></select></label><label><span>Move test account to</span><select id="transferTo"></select></label></div><p><button class="secondary" id="transferLink">Move this test account</button></p>');
+    $('#transferLink').addEventListener('click', transferReviewerAccount);
+  }
+  $('#transferFrom').innerHTML = state.employees.map((person) => `<option value="${person.id}">${person.name}</option>`).join('');
+  $('#transferTo').innerHTML = state.employees.map((person) => `<option value="${person.id}" ${person.id === 'kevin' ? 'selected' : ''}>${person.name}</option>`).join('');
 }
 function renderOverview() {
   const t = state.totals;
@@ -52,11 +73,12 @@ function renderTable(manager) {
   $('#table').innerHTML = `<table><thead><tr><th>Reference</th><th>Details</th><th>Description</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6">No submissions yet.</td></tr>'}</tbody></table>`;
 }
 
-$('#role').addEventListener('change', async (event) => { current = event.target.value; try { await refresh(); } catch (error) { showNotice(error.message, true); } });
+$('#role').addEventListener('change', async (event) => { const previous = current; current = event.target.value; $('#role').disabled = true; try { await refresh(); } catch (error) { current = previous; render(); showNotice(error.message, true); } finally { $('#role').disabled = false; } });
 $('#saleForm').addEventListener('submit', async (event) => { event.preventDefault(); const form = new FormData(event.target); try { await api('/api/submit', { actorId: current, record: { type: 'sale', reference: form.get('reference'), customer: form.get('customer'), description: form.get('description'), project: form.get('project'), amount: form.get('amount'), shares: { richard: Number(form.get('richard')), anastasia: Number(form.get('anastasia')), jean: Number(form.get('jean')) } } }); event.target.reset(); showNotice('Sale saved. It is awaiting Svetlana’s approval.'); await refresh(); } catch (error) { showNotice(error.message, true); } });
 $('#expenseForm').addEventListener('submit', async (event) => { event.preventDefault(); const form = new FormData(event.target); try { await api('/api/submit', { actorId: current, record: { type: 'expense', reference: form.get('reference'), description: form.get('description'), category: form.get('category'), amount: form.get('amount'), proposedAllocation: form.get('allocation') } }); event.target.reset(); showNotice('Expense saved.'); await refresh(); } catch (error) { showNotice(error.message, true); } });
 document.addEventListener('click', async (event) => { try { if (event.target.classList.contains('approve')) { const reference = event.target.dataset.ref; const body = event.target.dataset.type === 'sale' ? { actorId: current, reference, shares: { richard: Number($(`#${reference}-richard`).value), anastasia: Number($(`#${reference}-anastasia`).value), jean: Number($(`#${reference}-jean`).value) } } : { actorId: current, reference, allocation: $(`#${reference}-allocation`).value }; await api('/api/decision', body); showNotice(`${reference} updated.`); await refresh(); } if (event.target.classList.contains('retry')) { await api('/api/retry', { actorId: current, reference: event.target.dataset.ref }); showNotice('Sync retry completed.'); await refresh(); } } catch (error) { showNotice(error.message, true); } });
 $('#link').addEventListener('click', async () => { try { await api('/api/link', { actorId: current, employeeId: $('#linkEmployee').value, telegramUserId: $('#telegramUser').value, telegramChatId: $('#telegramChat').value }); showNotice('Telegram link saved.'); await refresh(); } catch (error) { showNotice(error.message, true); } });
+async function transferReviewerAccount() { const from = $('#transferFrom').value; const to = $('#transferTo').value; if (from === to) return showNotice('Choose two different employees.', true); if (!confirm('Move only the linked reviewer test account? Accounting records will not be changed.')) return; try { await api('/api/transfer-telegram-link', { actorId: current, fromEmployeeId: from, toEmployeeId: to }); showNotice('The reviewer test account was moved safely. Existing records were not changed.'); await refresh(); } catch (error) { showNotice(error.message, true); } }
 $('#reset').onclick = async () => { if (confirm('Clear all local transactions?')) { try { await api('/api/reset', { actorId: current }); showNotice('Local data cleared.'); await refresh(); } catch (error) { showNotice(error.message, true); } } };
 $('#test1').onclick = async () => { try { await api('/api/test', { actorId: current, test: '1' }); showNotice('Test 1 records loaded.'); await refresh(); } catch (error) { showNotice(error.message, true); } };
 $('#test2').onclick = async () => { try { await api('/api/test', { actorId: current, test: '2' }); showNotice('Test 2 records loaded.'); await refresh(); } catch (error) { showNotice(error.message, true); } };
