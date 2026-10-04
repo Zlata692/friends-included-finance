@@ -73,7 +73,9 @@ async function handle(req, res) {
   if (req.method === 'GET' && url.pathname === '/api/state') { const d = await load(); const viewer = actor(d, url.searchParams.get('actorId')); if (!viewer) return response(res, 403, { error: 'Choose a valid demonstration role.' }); const records = visibleRecords(d, viewer); return response(res, 200, { viewer: { id: viewer.id, role: viewer.role }, employees: publicEmployees(d), records, totals: viewer.role === 'manager' ? totals(d.records) : null }); }
   if (req.method !== 'POST') return response(res,404,{error:'Not found'});
   let body=''; for await (const c of req) { body += c; if (body.length > 100_000) throw Error('Request is too large.'); } try { body = JSON.parse(body || '{}'); const data = await load();
-    if (url.pathname === '/telegram/webhook') {
+    // Vercel routes this serverless handler under /api. Accept both the
+    // deployment URL used by Telegram and the direct local-development URL.
+    if (url.pathname === '/telegram/webhook' || url.pathname === '/api/telegram/webhook') {
       if (process.env.TELEGRAM_WEBHOOK_SECRET && req.headers['x-telegram-bot-api-secret-token'] !== process.env.TELEGRAM_WEBHOOK_SECRET) return response(res, 401, { error: 'Invalid Telegram webhook secret.' });
       const message = body.message; if (!message?.chat?.id || !message?.from?.id) return response(res, 200, { ok: true });
       const employee = data.employees.find((person) => String(person.telegramUserId) === String(message.from.id));
