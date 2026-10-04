@@ -68,7 +68,7 @@ function parseTelegramSubmission(text, employeeId) {
 async function handle(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`); if (req.method === 'GET' && url.pathname === '/') { res.writeHead(200, {'content-type':'text/html; charset=utf-8'}); return res.end(await readFile(join(root,'index.html'))); }
   if (req.method === 'GET' && url.pathname === '/app.js') { res.writeHead(200, {'content-type':'text/javascript; charset=utf-8'}); return res.end(await readFile(join(root,'app.js'))); }
-  if (req.method === 'GET' && url.pathname === '/api/state') { const d = await load(); return response(res,200,{employees:d.employees,records:d.records,totals:totals(d.records)}); }
+  if (req.method === 'GET' && url.pathname === '/api/state') { const d = await load(); const viewer = actor(d, url.searchParams.get('actorId')); if (!viewer) return response(res,403,{error:'Choose a valid role.'}); const records = viewer.role === 'manager' ? d.records : d.records.filter(r => r.submittedBy === viewer.id); return response(res,200,{viewer:{id:viewer.id,role:viewer.role},employees:d.employees.map(({id,name,role})=>({id,name,role})),records,totals:viewer.role === 'manager' ? totals(d.records) : null}); }
   if (req.method !== 'POST') return response(res,404,{error:'Not found'});
   let body=''; for await (const c of req) { body += c; if (body.length > 100_000) throw Error('Request is too large.'); } try { body = JSON.parse(body || '{}'); const data = await load();
     if (url.pathname === '/telegram/webhook' || url.pathname === '/api/telegram/webhook') {
