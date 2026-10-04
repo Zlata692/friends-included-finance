@@ -4,7 +4,7 @@ Local implementation of the Day 4 homework. Run it with Node 18+:
 
 ```powershell
 cd friends-included
-node server.mjs
+node app-server.mjs
 ```
 
 Open http://localhost:3000. Pick a demonstration role, add transactions, and use Svetlana's role to approve or correct them. The server enforces permissions and saves local development data in `data.json`.
