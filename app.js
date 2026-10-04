@@ -5,14 +5,15 @@ const eur = (n) => new Intl.NumberFormat('en-IE', { style: 'currency', currency:
 
 async function api(path, body) {
   const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  const payload = await response.json();
+  const text = await response.text();
+  const payload = JSON.parse(text);
   if (!response.ok) throw new Error(payload.error);
   return payload;
 }
 function showNotice(text, error = false) { $('#notice').innerHTML = `<div class="notice ${error ? 'error' : ''}">${text}</div>`; window.scrollTo({ top: 0, behavior: 'smooth' }); }
 async function refresh() {
-  const response = await fetch(`/api/state?actorId=${encodeURIComponent(current)}`);
-  state = await response.json();
+  const response = await fetch(`/api/state?actorId=${encodeURIComponent(current)}`, { cache: 'no-store' });
+  state = await response.json().catch(() => { throw new Error('The role could not be loaded. Please try again.'); });
   if (!response.ok) throw new Error(state.error);
   render();
 }
