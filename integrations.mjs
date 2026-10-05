@@ -37,14 +37,19 @@ function recordRow(record) {
   };
 }
 export async function loadSupabaseState(defaultEmployees) {
-  const [employees, rows] = await Promise.all([supabase('employees?select=*'), supabase('transactions?select=*&order=submitted_at.asc')]);
+  const [employees, rows, telegramLinks] = await Promise.all([
+    supabase('employees?select=*'),
+    supabase('transactions?select=*&order=submitted_at.asc'),
+    supabase('telegram_links?select=*')
+  ]);
   if (!employees.length) {
     await supabase('employees?on_conflict=id', { method: 'POST', body: JSON.stringify(defaultEmployees.map(employeeRow)) });
-    return { employees: defaultEmployees, records: rows.map((row) => row.payload) };
+    return { employees: defaultEmployees, records: rows.map((row) => row.payload), telegramLinks: [] };
   }
   return {
     employees: employees.map((row) => ({ id: row.id, name: row.name, role: row.role, telegramUserId: row.telegram_user_id, telegramChatId: row.telegram_chat_id })),
-    records: rows.map((row) => ({ ...row.payload, proposal: row.proposal, decision: row.decision, status: row.status, syncStatus: row.sync_status, notificationStatus: row.notification_status, notificationChatId: row.notification_chat_id }))
+    records: rows.map((row) => ({ ...row.payload, proposal: row.proposal, decision: row.decision, status: row.status, syncStatus: row.sync_status, notificationStatus: row.notification_status, notificationChatId: row.notification_chat_id })),
+    telegramLinks: telegramLinks.map((row) => ({ telegramUserId: row.telegram_user_id, employeeId: row.employee_id, telegramChatId: row.telegram_chat_id }))
   };
 }
 export async function saveSupabaseState(data) {
@@ -54,34 +59,42 @@ export async function saveSupabaseState(data) {
   ]);
 }
 
-// A normal link never takes an account from another employee. Moving the
-// reviewer account is deliberately a separate, explicit operation.
+// Links are separate from employees so a reviewer test account can be moved
+// without replacing another real employee's Telegram account.
+export function telegramEmployee(data, telegramUserId) {
+  const link = (data.telegramLinks || []).find((item) => String(item.telegramUserId) === String(telegramUserId));
+  if (link) return data.employees.find((person) => person.id === link.employeeId);
+  return data.employees.find((person) => String(person.telegramUserId) === String(telegramUserId));
+}
+
 export async function setTelegramLink(employeeId, telegramUserId, telegramChatId) {
   const userId = String(telegramUserId || '').trim() || null;
   const chatId = String(telegramChatId || '').trim() || null;
   if (!userId && chatId) throw new Error('Enter a Telegram user ID as well as the chat ID.');
-  if (userId) {
-    const matches = await supabase(`employees?telegram_user_id=eq.${encodeURIComponent(userId)}&select=id,name`);
-    if (matches.some((person) => person.id !== employeeId)) throw new Error('This Telegram account is already linked to another employee. Use the explicit test-account transfer below; no link was changed.');
+  if (!userId) {
+    await supabase(`telegram_links?employee_id=eq.${encodeURIComponent(employeeId)}`, { method: 'DELETE' });
+    return;
   }
-  await supabase(`employees?id=eq.${encodeURIComponent(employeeId)}`, { method: 'PATCH', body: JSON.stringify({ telegram_user_id: userId, telegram_chat_id: chatId }) });
+  const matches = await supabase(`telegram_links?telegram_user_id=eq.${encodeURIComponent(userId)}&select=employee_id`);
+  if (matches.some((link) => link.employee_id !== employeeId)) throw new Error('This Telegram account is already linked to another employee. Use the explicit test-account transfer below; no link was changed.');
+  await supabase('telegram_links?on_conflict=telegram_user_id', {
+    method: 'POST',
+    body: JSON.stringify([{ telegram_user_id: userId, employee_id: employeeId, telegram_chat_id: chatId }])
+  });
 }
 
 export async function transferTelegramLink(fromEmployeeId, toEmployeeId) {
   if (fromEmployeeId === toEmployeeId) throw new Error('Choose two different employees.');
-  const people = await supabase(`employees?id=in.(${encodeURIComponent(fromEmployeeId)},${encodeURIComponent(toEmployeeId)})&select=id,name,telegram_user_id,telegram_chat_id`);
+  const people = await supabase(`employees?id=in.(${encodeURIComponent(fromEmployeeId)},${encodeURIComponent(toEmployeeId)})&select=id,name`);
   const from = people.find((person) => person.id === fromEmployeeId);
   const to = people.find((person) => person.id === toEmployeeId);
   if (!from || !to) throw new Error('Employee not found.');
-  if (!from.telegram_user_id) throw new Error(`${from.name} has no linked Telegram account to move.`);
-  if (to.telegram_user_id) throw new Error(`${to.name} already has a Telegram link. Unlink that employee first; no link was changed.`);
-  await supabase(`employees?id=eq.${encodeURIComponent(fromEmployeeId)}`, { method: 'PATCH', body: JSON.stringify({ telegram_user_id: null, telegram_chat_id: null }) });
-  try {
-    await supabase(`employees?id=eq.${encodeURIComponent(toEmployeeId)}`, { method: 'PATCH', body: JSON.stringify({ telegram_user_id: from.telegram_user_id, telegram_chat_id: from.telegram_chat_id || null }) });
-  } catch (error) {
-    await supabase(`employees?id=eq.${encodeURIComponent(fromEmployeeId)}`, { method: 'PATCH', body: JSON.stringify({ telegram_user_id: from.telegram_user_id, telegram_chat_id: from.telegram_chat_id || null }) });
-    throw error;
-  }
+  const links = await supabase(`telegram_links?employee_id=eq.${encodeURIComponent(fromEmployeeId)}&select=telegram_user_id`);
+  if (!links.length) throw new Error(`${from.name} has no linked Telegram account to move.`);
+  if (links.length > 1) throw new Error(`${from.name} has more than one Telegram account. Choose a single account in Manager setup instead.`);
+  await supabase(`telegram_links?telegram_user_id=eq.${encodeURIComponent(links[0].telegram_user_id)}`, {
+    method: 'PATCH', body: JSON.stringify({ employee_id: to.id })
+  });
 }
 
 export async function telegramSend(chatId, text) {
