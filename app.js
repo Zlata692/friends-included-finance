@@ -12,6 +12,22 @@ async function api(path, body) {
   return payload;
 }
 function showNotice(text, error = false) { $('#notice').innerHTML = `<div class="notice ${error ? 'error' : ''}">${text}</div>`; window.scrollTo({ top: 0, behavior: 'smooth' }); }
+async function chooseRole(nextRole) {
+  const previous = current;
+  current = nextRole;
+  const roleSelect = $('#role');
+  roleSelect.disabled = true;
+  try {
+    await refresh();
+    $('#notice').innerHTML = '';
+  } catch (error) {
+    current = previous;
+    if (state) render();
+    showNotice(error.message, true);
+  } finally {
+    roleSelect.disabled = false;
+  }
+}
 async function refresh() {
   const url = `/api/state?actorId=${encodeURIComponent(current)}&t=${Date.now()}`;
   let lastError;
@@ -47,6 +63,10 @@ function render() {
   renderManager(me);
   renderTable(manager);
   $('#linkEmployee').innerHTML = state.employees.map((person) => `<option value="${person.id}">${person.name}</option>`).join('');
+  if (!$('#reviewerRoute')) {
+    $('.guide').insertAdjacentHTML('afterend', '<section class="section card" id="reviewerRoute"><h3>Reviewer-safe website test route</h3><p class="muted">This route does not change Telegram links or existing accounting records. Use it when a Telegram account is already linked to someone else.</p><div class="actions"><button class="secondary small reviewer-role" data-role="richard">Open Richard sales view</button><button class="secondary small reviewer-role" data-role="kevin">Open Kevin expense view</button><button class="secondary small reviewer-role" data-role="svetlana">Open Svetlana decisions</button></div><p class="muted">Test sequence: open Richard or Kevin, submit only a new small reference if a test is required, then open Svetlana to review it. Employee views show only that employee’s records.</p></section>');
+    document.querySelectorAll('.reviewer-role').forEach((button) => button.addEventListener('click', () => chooseRole(button.dataset.role)));
+  }
   if (!$('#transferLink')) {
     $('#managerOnly').insertAdjacentHTML('beforeend', '<hr><h3>Safe reviewer test-account transfer</h3><p class="muted">Moves only the Telegram account already linked to the selected source employee. It does not delete or alter accounting records; existing records keep their original notification destination.</p><div class="fields"><label><span>Currently linked to</span><select id="transferFrom"></select></label><label><span>Move test account to</span><select id="transferTo"></select></label></div><p><button class="secondary" id="transferLink">Move this test account</button></p>');
     $('#transferLink').addEventListener('click', transferReviewerAccount);
@@ -73,7 +93,7 @@ function renderTable(manager) {
   $('#table').innerHTML = `<table><thead><tr><th>Reference</th><th>Details</th><th>Description</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6">No submissions yet.</td></tr>'}</tbody></table>`;
 }
 
-$('#role').addEventListener('change', async (event) => { const previous = current; current = event.target.value; $('#role').disabled = true; try { await refresh(); } catch (error) { current = previous; render(); showNotice(error.message, true); } finally { $('#role').disabled = false; } });
+$('#role').addEventListener('change', (event) => chooseRole(event.target.value));
 $('#saleForm').addEventListener('submit', async (event) => { event.preventDefault(); const form = new FormData(event.target); try { await api('/api/submit', { actorId: current, record: { type: 'sale', reference: form.get('reference'), customer: form.get('customer'), description: form.get('description'), project: form.get('project'), amount: form.get('amount'), shares: { richard: Number(form.get('richard')), anastasia: Number(form.get('anastasia')), jean: Number(form.get('jean')) } } }); event.target.reset(); showNotice('Sale saved. It is awaiting Svetlana’s approval.'); await refresh(); } catch (error) { showNotice(error.message, true); } });
 $('#expenseForm').addEventListener('submit', async (event) => { event.preventDefault(); const form = new FormData(event.target); try { await api('/api/submit', { actorId: current, record: { type: 'expense', reference: form.get('reference'), description: form.get('description'), category: form.get('category'), amount: form.get('amount'), proposedAllocation: form.get('allocation') } }); event.target.reset(); showNotice('Expense saved.'); await refresh(); } catch (error) { showNotice(error.message, true); } });
 document.addEventListener('click', async (event) => { try { if (event.target.classList.contains('approve')) { const reference = event.target.dataset.ref; const body = event.target.dataset.type === 'sale' ? { actorId: current, reference, shares: { richard: Number($(`#${reference}-richard`).value), anastasia: Number($(`#${reference}-anastasia`).value), jean: Number($(`#${reference}-jean`).value) } } : { actorId: current, reference, allocation: $(`#${reference}-allocation`).value }; await api('/api/decision', body); showNotice(`${reference} updated.`); await refresh(); } if (event.target.classList.contains('retry')) { await api('/api/retry', { actorId: current, reference: event.target.dataset.ref }); showNotice('Sync retry completed.'); await refresh(); } } catch (error) { showNotice(error.message, true); } });
